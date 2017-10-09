@@ -24,6 +24,9 @@ int bpf_lookup_elem(int fd, const void *key, void *value);
 int bpf_update_elem(int fd, const void *key, const void *value, uint64_t flags);
 int bpf_get_next_key(int fd, void *key, void *next_key);
 
+unsigned str_length(const char str[]);
+void rev_string(char str[]); 
+  
 static inline __u64 ptr_to_u64(const void *ptr)
 {
 	return (__u64) (unsigned long) ptr;
@@ -53,8 +56,7 @@ int main(int argc, char ** argv)
   char buf[2048];
   int buf2;
 
-  int map_fd, prog_fd;
-  int map_fd2;
+  int map_fd, map_fd2, prog_fd;
   int key;
   int  value;
 
@@ -63,7 +65,7 @@ int main(int argc, char ** argv)
     return -1;
   }
 
-  if ((map_fd2 = bpf_create_map(BPF_MAP_TYPE_ARRAY, sizeof(pkt.key), sizeof(pkt.value), 2)) < 0) {
+  if ((map_fd2 = bpf_create_map(BPF_MAP_TYPE_ARRAY, sizeof(int), sizeof(pkt.key), 1)) < 0) {
     perror("bpf_create_map");
     return -1;
   }
@@ -82,8 +84,8 @@ int main(int argc, char ** argv)
     BPF_LD_ABS(BPF_B, 8),
 
     BPF_MOV64_REG(BPF_REG_7, BPF_REG_0),
-    BPF_JMP_IMM(BPF_JNE, BPF_REG_0, 1, 10),
-    BPF_ST_MEM(BPF_DW, BPF_REG_10, -8, 1),
+    BPF_JMP_IMM(BPF_JNE, BPF_REG_0, 1, 12),
+    /*BPF_ST_MEM(BPF_DW, BPF_REG_10, -8, 1),
     BPF_MOV64_REG(BPF_REG_2, BPF_REG_10),
     BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, -8),
     BPF_ST_MEM(BPF_DW, BPF_REG_10, -16, 2222),
@@ -92,6 +94,19 @@ int main(int argc, char ** argv)
     BPF_MOV64_IMM(BPF_REG_4, BPF_ANY),
     BPF_LD_MAP_FD(BPF_REG_1, map_fd),
     BPF_RAW_INSN(BPF_JMP | BPF_CALL, 0, 0, 0, BPF_FUNC_map_update_elem),
+    */
+    BPF_MOV64_REG(BPF_REG_1, BPF_REG_6),
+    BPF_LD_ABS(BPF_W, 12),
+    BPF_ST_MEM(BPF_DW, BPF_REG_10, -8, 0),
+    BPF_MOV64_REG(BPF_REG_2, BPF_REG_10),
+    BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, -8),
+    BPF_STX_MEM(BPF_DW, BPF_REG_10, BPF_REG_0, -16),
+    BPF_MOV64_REG(BPF_REG_3, BPF_REG_10),
+    BPF_ALU64_IMM(BPF_ADD, BPF_REG_3, -16),
+    BPF_MOV64_IMM(BPF_REG_4, BPF_ANY),
+    BPF_LD_MAP_FD(BPF_REG_1, map_fd2),
+    BPF_RAW_INSN(BPF_JMP | BPF_CALL, 0, 0, 0, BPF_FUNC_map_update_elem),
+    
 
     BPF_MOV64_REG(BPF_REG_1, BPF_REG_6),
     
@@ -156,12 +171,26 @@ int main(int argc, char ** argv)
 	return -1;	
       }
       printf("key[%d]::value = %d\n", i, value1);
+      
+      if (i == 0 && value1 == 1) {
+	int key2 = 0;
+	char value2[4];
+	if(bpf_lookup_elem(map_fd2, &key2, value2) < 0) {
+	  printf("bpf_lookup_elem() err=%d\n%s", errno, bpf_log_buf);
+	  return -1;	
+	}
+	rev_string(value2);
+	printf("recv key:: %s\n", value2);
+      }
+      
       i++;
     }
-    sleep(1);
+    sleep(3);
   }
 
   close(sd);
+  close(map_fd);
+  close(map_fd2);
   return 0;
 }
 
@@ -232,4 +261,23 @@ int bpf_get_next_key(int fd, void *key, void *next_key)
 
   return sys_bpf(BPF_MAP_GET_NEXT_KEY, &attr, sizeof(attr));
 }
- 
+
+unsigned str_length(const char str[])
+{
+  unsigned len = 0;
+  while (str[len])
+    len++;
+  return (len);
+}
+
+void rev_string(char str[])
+{
+  int i;
+  int len = 4;//str_length(str);
+  for (i = 0; i < len / 2; i++) {
+    char temp = str[i];
+    str[i] = str[len-i-1];
+    str[len-i-1] = temp;
+  }
+  str[5] = 0;
+}
